@@ -11,6 +11,7 @@ let appState = {
 // --- DOM ELEMENTS ---
 const elements = {
     refreshBtn: document.getElementById('refreshBtn'),
+    exportCsvBtn: document.getElementById('exportCsvBtn'),
     statusIndicator: document.getElementById('statusIndicator'),
     statusText: document.getElementById('statusText'),
     searchInput: document.getElementById('searchInput'),
@@ -57,6 +58,11 @@ function setupEventListeners() {
     // Refresh button
     elements.refreshBtn.addEventListener('click', () => {
         fetchReleaseNotes();
+    });
+
+    // Export CSV button
+    elements.exportCsvBtn.addEventListener('click', () => {
+        exportToCSV();
     });
 
     // Retry button
@@ -273,24 +279,7 @@ function syncStatsCardsHighlight() {
 // --- RENDER FILTERED UPDATES ---
 function renderFilteredUpdates() {
     const timeline = elements.updatesTimeline;
-    
-    // Apply filters
-    const filtered = appState.updates.filter(update => {
-        // Filter by category
-        if (appState.currentFilter !== 'all' && update.category !== appState.currentFilter) {
-            return false;
-        }
-        
-        // Filter by search query
-        if (appState.searchQuery) {
-            const dateMatch = update.date.toLowerCase().includes(appState.searchQuery);
-            const catMatch = update.category.toLowerCase().includes(appState.searchQuery);
-            const textMatch = update.text.toLowerCase().includes(appState.searchQuery);
-            return dateMatch || catMatch || textMatch;
-        }
-        
-        return true;
-    });
+    const filtered = getFilteredUpdates();
 
     // Check if empty
     if (filtered.length === 0) {
@@ -357,6 +346,13 @@ function renderFilteredUpdates() {
                         </svg>
                         <span>Docs</span>
                     </a>
+                    <button class="btn-card-action copy" data-id="${update.id}" title="Copy description to clipboard">
+                        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                        </svg>
+                        <span>Copy</span>
+                    </button>
                     <button class="btn-card-action tweet" data-id="${update.id}">
                         <svg class="x-icon" viewBox="0 0 24 24" fill="currentColor">
                             <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
@@ -370,6 +366,11 @@ function renderFilteredUpdates() {
             const checkbox = card.querySelector('.update-select-checkbox');
             checkbox.addEventListener('change', (e) => {
                 handleSelectionChange(update.id, e.target.checked);
+            });
+
+            const copyBtn = card.querySelector('.copy');
+            copyBtn.addEventListener('click', () => {
+                handleCopyToClipboard(update, copyBtn);
             });
 
             const tweetBtn = card.querySelector('.tweet');
@@ -602,4 +603,87 @@ function submitTweetToX() {
     
     // Close modal
     closeTweetModal();
+}
+
+// --- UTILITY FEATURES ---
+
+// Get active updates based on current search and filter settings
+function getFilteredUpdates() {
+    return appState.updates.filter(update => {
+        // Filter by category
+        if (appState.currentFilter !== 'all' && update.category !== appState.currentFilter) {
+            return false;
+        }
+        
+        // Filter by search query
+        if (appState.searchQuery) {
+            const dateMatch = update.date.toLowerCase().includes(appState.searchQuery);
+            const catMatch = update.category.toLowerCase().includes(appState.searchQuery);
+            const textMatch = update.text.toLowerCase().includes(appState.searchQuery);
+            return dateMatch || catMatch || textMatch;
+        }
+        
+        return true;
+    });
+}
+
+// Copy single update contents to user clipboard with temporary visual feedback
+function handleCopyToClipboard(update, btn) {
+    const textToCopy = `[BigQuery - ${update.category}] (${update.date})\n\n${update.text}\n\nSource: ${update.link}`;
+    
+    navigator.clipboard.writeText(textToCopy).then(() => {
+        const span = btn.querySelector('span');
+        const originalText = span.textContent;
+        span.textContent = "Copied!";
+        btn.style.borderColor = "var(--cat-feature)";
+        btn.style.color = "var(--cat-feature)";
+        
+        setTimeout(() => {
+            span.textContent = originalText;
+            btn.style.borderColor = "";
+            btn.style.color = "";
+        }, 2000);
+    }).catch(err => {
+        console.error('Failed to copy text: ', err);
+        alert('Failed to copy to clipboard.');
+    });
+}
+
+// Export current filtered updates to local UTF-8 CSV download
+function exportToCSV() {
+    const filtered = getFilteredUpdates();
+    if (filtered.length === 0) {
+        alert("No updates to export.");
+        return;
+    }
+    
+    const headers = ["Date", "Category", "Source Link", "Description"];
+    const csvRows = [headers.join(",")];
+    
+    filtered.forEach(u => {
+        const row = [
+            u.date,
+            u.category,
+            u.link,
+            u.text
+        ].map(val => {
+            let formatted = val.replace(/"/g, '""'); // Escape double quotes
+            return `"${formatted}"`;
+        });
+        csvRows.push(row.join(","));
+    });
+    
+    const csvContent = "\uFEFF" + csvRows.join("\n"); // Excel UTF-8 BOM
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    link.setAttribute("download", `bigquery_release_notes_${dateStr}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 }
